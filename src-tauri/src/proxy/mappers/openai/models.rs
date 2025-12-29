@@ -65,7 +65,7 @@ pub struct OpenAIImageUrl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIMessage {
     pub role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_content")]
     pub content: Option<OpenAIContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
@@ -73,6 +73,26 @@ pub struct OpenAIMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+}
+
+/// 自定义反序列化：支持 content 为 null、string 或 array
+fn deserialize_content<'de, D>(deserializer: D) -> Result<Option<OpenAIContent>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::Null) => Ok(None),  // 关键：null 转为 None
+        Some(serde_json::Value::String(s)) => Ok(Some(OpenAIContent::String(s))),
+        Some(serde_json::Value::Array(arr)) => {
+            let blocks: Vec<OpenAIContentBlock> = serde_json::from_value(serde_json::Value::Array(arr))
+                .map_err(|e| D::Error::custom(format!("Invalid content array: {}", e)))?;
+            Ok(Some(OpenAIContent::Array(blocks)))
+        }
+        Some(other) => Err(D::Error::custom(format!("Invalid content type: expected null, string or array, got {:?}", other))),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -13,8 +13,14 @@ pub async fn handle_chat_completions(
     State(state): State<AppState>,
     Json(body): Json<Value>
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let mut openai_req: OpenAIRequest = serde_json::from_value(body)
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e)))?;
+    // 调试：打印原始请求体
+    tracing::debug!("[OpenAI] Raw request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    
+    let mut openai_req: OpenAIRequest = serde_json::from_value(body.clone())
+        .map_err(|e| {
+            tracing::error!("[OpenAI] Failed to parse request: {}\nBody: {}", e, serde_json::to_string_pretty(&body).unwrap_or_default());
+            (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
+        })?;
 
     // Safety: Ensure messages is not empty
     if openai_req.messages.is_empty() {
