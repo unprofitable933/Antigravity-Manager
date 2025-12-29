@@ -30,6 +30,19 @@ struct QuotaInfo {
 struct LoadProjectResponse {
     #[serde(rename = "cloudaicompanionProject")]
     project_id: Option<String>,
+    #[serde(rename = "currentTier")]
+    current_tier: Option<Tier>,
+    #[serde(rename = "paidTier")]
+    paid_tier: Option<Tier>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Tier {
+    id: Option<String>,
+    #[serde(rename = "quotaTier")]
+    quota_tier: Option<String>,
+    name: Option<String>,
+    slug: Option<String>,
 }
 
 /// 创建配置好的 HTTP Client
@@ -37,61 +50,74 @@ fn create_client() -> reqwest::Client {
     crate::utils::http::create_client(15)
 }
 
-/// 获取 Project ID
-async fn fetch_project_id(access_token: &str) -> Option<String> {
-    let client = create_client();
-    let body = json!({
-        "metadata": {
-            "ideType": "ANTIGRAVITY"
-        }
-    });
+const CLOUD_CODE_BASE_URL: &str = "https://cloudcode-pa.googleapis.com";
 
-    // 简单的重试
-    for _ in 0..2 {
-        match client
-            .post(LOAD_PROJECT_API_URL)
-            .bearer_auth(access_token)
-            .header("User-Agent", USER_AGENT)
-            .json(&body)
-            .send()
-            .await 
-        {
-            Ok(res) => {
-                if res.status().is_success() {
-                    if let Ok(data) = res.json::<LoadProjectResponse>().await {
-                        if let Some(pid) = data.project_id {
-                            return Some(pid);
-                        }
+/// 获取项目 ID 和订阅类型
+async fn fetch_project_id(access_token: &str, email: &str) -> (Option<String>, Option<String>) {
+    let client = create_client();
+    let meta = json!({"metadata": {"ideType": "ANTIGRAVITY"}});
+
+    let res = client
+        .post(format!("{}/v1internal:loadCodeAssist", CLOUD_CODE_BASE_URL))
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::USER_AGENT, "antigravity/windows/amd64")
+        .json(&meta)
+        .send()
+        .await;
+
+    match res {
+        Ok(res) => {
+            if res.status().is_success() {
+                if let Ok(data) = res.json::<LoadProjectResponse>().await {
+                    let project_id = data.project_id.clone();
+                    
+                    // 核心逻辑：优先从 paid_tier 获取订阅 ID，这比 current_tier 更能反映真实账户权益
+                    let subscription_tier = data.paid_tier
+                        .and_then(|t| t.id)
+                        .or_else(|| data.current_tier.and_then(|t| t.id));
+                    
+                    if let Some(ref tier) = subscription_tier {
+                        crate::modules::logger::log_info(&format!(
+                            "📊 [{}] 订阅识别成功: {}", email, tier
+                        ));
                     }
+                    
+                    return (project_id, subscription_tier);
                 }
+            } else {
+                crate::modules::logger::log_warn(&format!(
+                    "⚠️  [{}] loadCodeAssist 失败: Status: {}", email, res.status()
+                ));
             }
-            Err(_) => {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
+        }
+        Err(e) => {
+            crate::modules::logger::log_error(&format!("❌ [{}] loadCodeAssist 网络错误: {}", email, e));
         }
     }
-
-    // 如果获取失败，使用内置的随机生成逻辑作为兜底
-    let mock_id = crate::proxy::project_resolver::generate_mock_project_id();
-    crate::modules::logger::log_warn(&format!("账号无资格获取官方 cloudaicompanionProject，配额查询将使用随机生成的 Project ID 作为兜底: {}", mock_id));
-    Some(mock_id)
+    
+    (None, None)
 }
 
-/// 查询账号配额
-pub async fn fetch_quota(access_token: &str) -> crate::error::AppResult<(QuotaData, Option<String>)> {
+/// 查询账号配额的统一入口
+pub async fn fetch_quota(access_token: &str, email: &str) -> crate::error::AppResult<(QuotaData, Option<String>)> {
+    fetch_quota_inner(access_token, email).await
+}
+
+/// 查询账号配额逻辑
+pub async fn fetch_quota_inner(access_token: &str, email: &str) -> crate::error::AppResult<(QuotaData, Option<String>)> {
     use crate::error::AppError;
-    crate::modules::logger::log_info("开始外部查询配额...");
+    // crate::modules::logger::log_info(&format!("[{}] 开始外部查询配额...", email));
+    
+    // 1. 获取 Project ID 和订阅类型
+    let (project_id, subscription_tier) = fetch_project_id(access_token, email).await;
+    
+    let final_project_id = project_id.as_deref().unwrap_or("bamboo-precept-lgxtn");
+    
     let client = create_client();
-    
-    // 1. 获取 Project ID
-    let project_id = fetch_project_id(access_token).await;
-    crate::modules::logger::log_info(&format!("Project ID 获取结果: {:?}", project_id));
-    
-    // 2. 构建请求体
-    let mut payload = serde_json::Map::new();
-    if let Some(ref pid) = project_id {
-        payload.insert("project".to_string(), json!(pid));
-    }
+    let payload = json!({
+        "project": final_project_id
+    });
     
     let url = QUOTA_API_URL;
     let max_retries = 3;
@@ -120,7 +146,8 @@ pub async fn fetch_quota(access_token: &str) -> crate::error::AppResult<(QuotaDa
                         ));
                         let mut q = QuotaData::new();
                         q.is_forbidden = true;
-                        return Ok((q, project_id));
+                        q.subscription_tier = subscription_tier.clone();
+                        return Ok((q, project_id.clone()));
                     }
                     
                     // 其他错误继续重试逻辑
@@ -161,7 +188,10 @@ pub async fn fetch_quota(access_token: &str) -> crate::error::AppResult<(QuotaDa
                     }
                 }
                 
-                return Ok((quota_data, project_id));
+                // 设置订阅类型
+                quota_data.subscription_tier = subscription_tier.clone();
+                
+                return Ok((quota_data, project_id.clone()));
             },
             Err(e) => {
                 crate::modules::logger::log_warn(&format!("请求失败: {} (尝试 {}/{})", e, attempt, max_retries));
@@ -182,7 +212,8 @@ pub async fn fetch_all_quotas(accounts: Vec<(String, String)>) -> Vec<(String, c
     let mut results = Vec::new();
     
     for (account_id, access_token) in accounts {
-        let result = fetch_quota(&access_token).await.map(|(q, _)| q);
+        // 在批量查询中，我们将 account_id 传入以供日志标识
+        let result = fetch_quota(&access_token, &account_id).await.map(|(q, _)| q);
         results.push((account_id, result));
     }
     

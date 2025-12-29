@@ -471,7 +471,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     }
 
     // 2. 尝试查询
-    let result = modules::fetch_quota(&account.token.access_token).await;
+    let result: crate::error::AppResult<(QuotaData, Option<String>)> = modules::fetch_quota(&account.token.access_token, &account.email).await;
     
     // 捕获可能更新的 project_id 并保存
     if let Ok((ref _q, ref project_id)) = result {
@@ -519,7 +519,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                 upsert_account(account.email.clone(), name, new_token.clone()).map_err(AppError::Account)?;
                 
                 // 重试查询
-                let retry_result = modules::fetch_quota(&new_token.access_token).await;
+                let retry_result: crate::error::AppResult<(QuotaData, Option<String>)> = modules::fetch_quota(&new_token.access_token, &account.email).await;
                 
                 // 同样处理重试时的 project_id 保存
                 if let Ok((ref _q, ref project_id)) = retry_result {

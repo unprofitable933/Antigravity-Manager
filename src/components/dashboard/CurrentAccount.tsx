@@ -1,4 +1,4 @@
-import { CheckCircle, Mail } from 'lucide-react';
+import { CheckCircle, Mail, Diamond, Gem, Circle } from 'lucide-react';
 import { Account } from '../../types/account';
 import { formatTimeRemaining } from '../../utils/format';
 
@@ -37,9 +37,37 @@ function CurrentAccount({ account, onSwitch }: CurrentAccountProps) {
             </h2>
 
             <div className="space-y-4 flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                    <Mail className="w-3.5 h-3.5 text-gray-400" />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{account.email}</span>
+                <div className="flex items-center gap-3 mb-1">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Mail className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{account.email}</span>
+                    </div>
+                    {/* 订阅类型 */}
+                    {account.quota?.subscription_tier && (() => {
+                        const tier = account.quota.subscription_tier.toLowerCase();
+                        if (tier.includes('ultra')) {
+                            return (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-purple-600 to-pink-600 text-white text-[10px] font-bold shadow-sm shrink-0">
+                                    <Gem className="w-2.5 h-2.5 fill-current" />
+                                    ULTRA
+                                </span>
+                            );
+                        } else if (tier.includes('pro')) {
+                            return (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-bold shadow-sm shrink-0">
+                                    <Diamond className="w-2.5 h-2.5 fill-current" />
+                                    PRO
+                                </span>
+                            );
+                        } else {
+                            return (
+                                <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-[10px] font-bold shadow-sm border border-gray-200 dark:border-white/10 shrink-0">
+                                    <Circle className="w-2.5 h-2.5" />
+                                    FREE
+                                </span>
+                            );
+                        }
+                    })()}
                 </div>
 
                 {/* Gemini Pro 配额 */}

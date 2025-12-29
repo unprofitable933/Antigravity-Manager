@@ -172,7 +172,7 @@ impl NonStreamingProcessor {
         // 3. InlineData (Image) 处理
         if let Some(img) = &part.inline_data {
             self.flush_thinking();
-            
+
             let mime_type = &img.mime_type;
             let data = &img.data;
             if !data.is_empty() {
@@ -184,30 +184,28 @@ impl NonStreamingProcessor {
     }
 
     /// 处理 Grounding 元数据 (Web Search 结果)
-    fn process_grounding(&mut self, grounding: &serde_json::Value) {
+    fn process_grounding(&mut self, grounding: &GroundingMetadata) {
         let mut grounding_text = String::new();
-        
+
         // 1. 处理搜索词
-        if let Some(queries) = grounding.get("webSearchQueries").and_then(|q| q.as_array()) {
-            let query_list: Vec<&str> = queries.iter().filter_map(|v| v.as_str()).collect();
-            if !query_list.is_empty() {
+        if let Some(queries) = &grounding.web_search_queries {
+            if !queries.is_empty() {
                 grounding_text.push_str("\n\n---\n**🔍 已为您搜索：** ");
-                grounding_text.push_str(&query_list.join(", "));
+                grounding_text.push_str(&queries.join(", "));
             }
         }
 
         // 2. 处理来源链接 (Chunks)
-        let chunks = grounding.get("groundingChunks").or_else(|| grounding.get("grounding_metadata").and_then(|m| m.get("groundingChunks")));
-        if let Some(chunks_arr) = chunks.and_then(|v| v.as_array()) {
+        if let Some(chunks) = &grounding.grounding_chunks {
             let mut links = Vec::new();
-            for (i, chunk) in chunks_arr.iter().enumerate() {
-                if let Some(web) = chunk.get("web") {
-                    let title = web.get("title").and_then(|v| v.as_str()).unwrap_or("网页来源");
-                    let uri = web.get("uri").and_then(|v| v.as_str()).unwrap_or("#");
+            for (i, chunk) in chunks.iter().enumerate() {
+                if let Some(web) = &chunk.web {
+                    let title = web.title.as_deref().unwrap_or("网页来源");
+                    let uri = web.uri.as_deref().unwrap_or("#");
                     links.push(format!("[{}] [{}]({})", i + 1, title, uri));
                 }
             }
-            
+
             if !links.is_empty() {
                 grounding_text.push_str("\n\n**🌐 来源引文：**\n");
                 grounding_text.push_str(&links.join("\n"));
@@ -245,7 +243,11 @@ impl NonStreamingProcessor {
         let thinking = self.thinking_builder.clone();
         let signature = self.thinking_signature.take();
 
-        self.content_blocks.push(ContentBlock::Thinking { thinking, signature, cache_control: None });
+        self.content_blocks.push(ContentBlock::Thinking {
+            thinking,
+            signature,
+            cache_control: None,
+        });
         self.thinking_builder.clear();
     }
 
@@ -276,16 +278,12 @@ impl NonStreamingProcessor {
             });
 
         ClaudeResponse {
-            id: gemini_response
-                .response_id
-                .clone()
-                .unwrap_or_else(|| format!("msg_{}", crate::proxy::common::utils::generate_random_id())),
+            id: gemini_response.response_id.clone().unwrap_or_else(|| {
+                format!("msg_{}", crate::proxy::common::utils::generate_random_id())
+            }),
             type_: "message".to_string(),
             role: "assistant".to_string(),
-            model: gemini_response
-                .model_version
-                .clone()
-                .unwrap_or_default(),
+            model: gemini_response.model_version.clone().unwrap_or_default(),
             content: self.content_blocks.clone(),
             stop_reason: stop_reason.to_string(),
             stop_sequence: None,
@@ -321,6 +319,7 @@ mod tests {
                 }),
                 finish_reason: Some("STOP".to_string()),
                 index: Some(0),
+                grounding_metadata: None,
             }]),
             usage_metadata: Some(UsageMetadata {
                 prompt_token_count: Some(10),
@@ -374,6 +373,7 @@ mod tests {
                 }),
                 finish_reason: Some("STOP".to_string()),
                 index: Some(0),
+                grounding_metadata: None,
             }]),
             usage_metadata: None,
             model_version: Some("gemini-2.5-pro".to_string()),
@@ -387,7 +387,11 @@ mod tests {
         assert_eq!(claude_resp.content.len(), 2);
 
         match &claude_resp.content[0] {
-            ContentBlock::Thinking { thinking, signature, .. } => {
+            ContentBlock::Thinking {
+                thinking,
+                signature,
+                ..
+            } => {
                 assert_eq!(thinking, "Let me think...");
                 assert_eq!(signature.as_deref(), Some("sig123"));
             }

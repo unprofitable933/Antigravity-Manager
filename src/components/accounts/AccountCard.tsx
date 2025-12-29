@@ -1,6 +1,8 @@
-import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban } from 'lucide-react';
+import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle } from 'lucide-react';
 import { Account } from '../../types/account';
 import { getQuotaColor, formatTimeRemaining } from '../../utils/format';
+import { cn } from '../../utils/cn';
+import { useTranslation } from 'react-i18next';
 
 interface AccountCardProps {
     account: Account;
@@ -15,8 +17,6 @@ interface AccountCardProps {
     onExport: () => void;
     onDelete: () => void;
 }
-
-import { useTranslation } from 'react-i18next';
 
 function AccountCard({ account, selected, onSelect, isCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete }: AccountCardProps) {
     const { t } = useTranslation();
@@ -36,10 +36,13 @@ function AccountCard({ account, selected, onSelect, isCurrent, isRefreshing, isS
     };
 
     return (
-        <div className={`flex flex-col p-3 rounded-xl border transition-all hover:shadow-md ${isCurrent
-            ? 'bg-blue-50/30 border-blue-200 dark:bg-blue-900/10 dark:border-blue-900/30'
-            : 'bg-white dark:bg-base-100 border-gray-200 dark:border-base-300'
-            } ${isRefreshing ? 'opacity-70' : ''}`}>
+        <div className={cn(
+            "flex flex-col p-3 rounded-xl border transition-all hover:shadow-md",
+            isCurrent
+                ? "bg-blue-50/30 border-blue-200 dark:bg-blue-900/10 dark:border-blue-900/30"
+                : "bg-white dark:bg-base-100 border-gray-200 dark:border-base-300",
+            isRefreshing && "opacity-70"
+        )}>
 
             {/* Header: Checkbox + Email + Badges */}
             <div className="flex-none flex items-start gap-3 mb-2">
@@ -52,20 +55,51 @@ function AccountCard({ account, selected, onSelect, isCurrent, isRefreshing, isS
                 />
                 <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className={`font-semibold text-sm truncate ${isCurrent ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-base-content'}`} title={account.email}>
+                        <h3 className={cn(
+                            "font-semibold text-sm truncate",
+                            isCurrent ? "text-blue-700 dark:text-blue-400" : "text-gray-900 dark:text-base-content"
+                        )} title={account.email}>
                             {account.email}
                         </h3>
-                        {isCurrent && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-semibold whitespace-nowrap">
-                                {t('accounts.current')}
-                            </span>
-                        )}
-                        {account.quota?.is_forbidden && (
-                            <span className="px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[10px] font-semibold flex items-center gap-1 whitespace-nowrap" title={t('accounts.forbidden_tooltip')}>
-                                <Lock className="w-3 h-3" />
-                                {t('accounts.forbidden')}
-                            </span>
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                            {isCurrent && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-bold shadow-sm border border-blue-200/50">
+                                    {t('accounts.current').toUpperCase()}
+                                </span>
+                            )}
+                            {account.quota?.is_forbidden && (
+                                <span className="px-1.5 py-0.5 rounded-md bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 text-[9px] font-bold flex items-center gap-1 shadow-sm border border-red-200/50" title={t('accounts.forbidden_tooltip')}>
+                                    <Lock className="w-2.5 h-2.5" />
+                                    {t('accounts.forbidden').toUpperCase()}
+                                </span>
+                            )}
+                            {/* 订阅类型徽章 */}
+                            {account.quota?.subscription_tier && (() => {
+                                const tier = account.quota.subscription_tier.toLowerCase();
+                                if (tier.includes('ultra')) {
+                                    return (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-purple-600 to-pink-600 text-white text-[9px] font-bold shadow-sm">
+                                            <Gem className="w-2.5 h-2.5 fill-current" />
+                                            ULTRA
+                                        </span>
+                                    );
+                                } else if (tier.includes('pro')) {
+                                    return (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[9px] font-bold shadow-sm">
+                                            <Diamond className="w-2.5 h-2.5 fill-current" />
+                                            PRO
+                                        </span>
+                                    );
+                                } else {
+                                    return (
+                                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-white/10 text-gray-500 dark:text-gray-400 text-[9px] font-bold shadow-sm border border-gray-200 dark:border-white/10">
+                                            <Circle className="w-2.5 h-2.5" />
+                                            FREE
+                                        </span>
+                                    );
+                                }
+                            })()}
+                        </div>
                     </div>
                 </div>
             </div>

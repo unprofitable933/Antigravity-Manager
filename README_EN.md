@@ -1,5 +1,5 @@
 # Antigravity Tools 🚀
-> Professional AI Account Management & Proxy System (v3.3.1)
+> Professional AI Account Management & Proxy System (v3.3.3)
 
 <div align="center">
   <img src="public/icon.png" alt="Antigravity Logo" width="120" height="120" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
@@ -9,7 +9,7 @@
   
   <p>
     <a href="https://github.com/lbjlaq/Antigravity-Manager">
-      <img src="https://img.shields.io/badge/Version-3.3.1-blue?style=flat-square" alt="Version">
+      <img src="https://img.shields.io/badge/Version-3.3.3-blue?style=flat-square" alt="Version">
     </a>
     <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri">
     <img src="https://img.shields.io/badge/Backend-Rust-red?style=flat-square" alt="Rust">
@@ -44,7 +44,7 @@ By leveraging this app, you can transform common Web Sessions (Google/Anthropic)
 *   **Smart Recommendation**: The system uses a real-time algorithm to filter and recommend the "Best Account" based on quota redundancy, supporting **one-click switching**.
 *   **Active Account Snapshot**: Visually displays the specific quota percentage and the last synchronization time of the currently active account.
 
-### 2. 🔐 Professional AI Account Management & Proxy System (v3.3.1)
+### 2. 🔐 Professional AI Account Management & Proxy System (v3.3.2)
 *   **OAuth 2.0 Authorization (Auto/Manual)**: Pre-generates a copyable authorization URL so you can finish auth in any browser; after the callback, the app auto-completes and saves the account (use “I already authorized, continue” if needed).
 *   **Multi-dimensional Import**: Supports single token entry, JSON batch import, and automatic hot migration from V1 legacy databases.
 *   **Gateway-level Views**: Supports switching between "List" and "Grid" views. Provides 403 Forbidden detection, automatically marking and skipping accounts with permission anomalies.
@@ -66,17 +66,18 @@ By leveraging this app, you can transform common Web Sessions (Google/Anthropic)
 
 ##  GUI Overview
 
-````carousel
 ![Dashboard - Global Quota Monitoring & One-click Switch](docs/images/dashboard-light.png)
-<!-- slide -->
 ![Account List - High-density Quota Display & Smart 403 Labeling](docs/images/accounts-light.png)
-<!-- slide -->
 ![About Page - About Antigravity Tools](docs/images/about-dark.png)
-<!-- slide -->
 ![API Proxy - Service Control](docs/images/v3/proxy-settings.png)
-<!-- slide -->
 ![Settings - General Config](docs/images/settings-dark.png)
-````
+
+### 💡 Usage Examples
+
+![Claude Code Web Search - Structured source and citation display](docs/images/usage/claude-code-search.png)
+![Cherry Studio Deep Integration - Native echo of search citations and source links](docs/images/usage/cherry-studio-citations.png)
+![Imagen 3 Advanced Drawing - Perfect restoration of Prompt artistic conception and details](docs/images/usage/image-gen-nebula.png)
+![Kilo Code Integration - Multi-account high-speed rotation and model penetration](docs/images/usage/kilo-code-integration.png)
 
 ## 🏗️ Architecture
 
@@ -158,6 +159,20 @@ print(response.choices[0].message.content)
 
 ## 📝 Developer & Community
 
+    *   **v3.3.3 (2025-12-29)**:
+        - **Account Management Enhancements**:
+            - **Subscription Tier Identification**: Integrated automatic detection, labeling, and filtering for account subscription tiers (PRO/ULTRA/FREE).
+            - **Multi-dimensional Filtering**: Added new filter tabs ("All", "Available", "Low Quota", "PRO", "ULTRA", "FREE") with real-time counters and integrated search.
+            - **UI/UX Optimization**: Implemented a premium tabbed interface; refined the header layout with an elastic search bar and responsive action buttons to maximize workspace efficiency across different resolutions.
+        - **Critical Fixes**:
+            - **Root Fix for Claude Extended Thinking 400 Errors**: Resolved the format validation error caused by missing `thought: true` markers in historical `ContentBlock::Thinking` messages. This issue led to `400 INVALID_REQUEST_ERROR` regardless of whether thinking was explicitly enabled, especially in multi-turn conversations.
+    *   **v3.3.2 (2025-12-29)**:
+        - **New Features (Core Thanks to @XinXin622 PR #128)**:
+            - **Web Search Citation Support for Claude Protocol**: Successfully mapped Gemini's raw Google Search results to Claude's native `web_search_tool_result` content blocks. Structured search citations and source links now display correctly in compatible clients like Cherry Studio.
+            - **Enhanced Thinking Mode Stability (Global Signature Store v2)**: Introduced a more robust global `thoughtSignature` storage mechanism. The system now captures real-time signatures from streaming responses and automatically backfills them for subsequent requests missing signatures, significantly reducing `400 INVALID_ARGUMENT` errors.
+        - **Optimizations & Bug Fixes**:
+            - **Hardened Data Models**: Unified and refactored the internal `GroundingMetadata` structures, resolving type conflicts and parsing anomalies identified during PR #128 integration.
+            - **Streaming Logic Refinement**: Optimized the SSE conversion engine to ensure proper extraction and persistence of `thoughtSignature` across fragmented streaming chunks.
     *   **v3.3.1 (2025-12-28)**:
         - **Critical Fixes**:
             - **Deep Fix for Claude Protocol 400 Errors (Claude Code Optimization)**:
@@ -250,6 +265,14 @@ print(response.choices[0].message.content)
         - **Multimodal Optimization**: Deep adaptation for Imagen 3 with 100MB payload capacity and aspect ratio controls.
         - **Global Upstream Proxy**: Centralized request management supporting HTTP/SOCKS5 with hot-reloading.
     *   See [Releases](https://github.com/lbjlaq/Antigravity-Manager/releases) for earlier history.
+
+## 👥 Contributors
+
+<a href="https://github.com/lbjlaq"><img src="https://github.com/lbjlaq.png" width="50px" style="border-radius: 50%;" alt="lbjlaq"/></a>
+<a href="https://github.com/XinXin622"><img src="https://github.com/XinXin622.png" width="50px" style="border-radius: 50%;" alt="XinXin622"/></a>
+<a href="https://github.com/llsenyue"><img src="https://github.com/llsenyue.png" width="50px" style="border-radius: 50%;" alt="llsenyue"/></a>
+
+Special thanks to all developers who have contributed to this project.
 *   **License**: **CC BY-NC-SA 4.0**. Strictly for non-commercial use.
 *   **Security**: All account data is encrypted and stored locally in a SQLite database. Data never leaves your device unless sync is enabled.
 

@@ -361,7 +361,9 @@ pub async fn handle_messages(
             && !retried_without_thinking
             && (error_text.contains("Invalid `signature`")
                 || error_text.contains("thinking.signature: Field required")
-                || error_text.contains("thinking.signature"))
+                || error_text.contains("thinking.thinking: Field required")
+                || error_text.contains("thinking.signature")
+                || error_text.contains("thinking.thinking"))
         {
             retried_without_thinking = true;
             tracing::warn!("Upstream rejected thinking signature; retrying once with thinking stripped");

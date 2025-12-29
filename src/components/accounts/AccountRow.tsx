@@ -1,6 +1,8 @@
-import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban } from 'lucide-react';
+import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle } from 'lucide-react';
 import { Account } from '../../types/account';
 import { getQuotaColor, formatTimeRemaining } from '../../utils/format';
+import { cn } from '../../utils/cn';
+import { useTranslation } from 'react-i18next';
 
 interface AccountRowProps {
     account: Account;
@@ -15,8 +17,6 @@ interface AccountRowProps {
     onExport: () => void;
     onDelete: () => void;
 }
-
-import { useTranslation } from 'react-i18next';
 
 function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete }: AccountRowProps) {
     const { t } = useTranslation();
@@ -37,7 +37,11 @@ function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSw
     };
 
     return (
-        <tr className={`group hover:bg-gray-50 dark:hover:bg-base-200 transition-colors border-b border-gray-100 dark:border-base-200 ${isCurrent ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''} ${isRefreshing ? 'opacity-70' : ''}`}>
+        <tr className={cn(
+            "group hover:bg-gray-50 dark:hover:bg-base-200 transition-colors border-b border-gray-100 dark:border-base-200",
+            isCurrent && "bg-blue-50/50 dark:bg-blue-900/10",
+            isRefreshing && "opacity-70"
+        )}>
             {/* 序号 */}
             <td className="pl-6 py-1 w-12">
                 <input
@@ -51,21 +55,55 @@ function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSw
 
             {/* 邮箱 */}
             <td className="px-4 py-1">
-                <div className="flex items-center gap-2">
-                    <span className={`font-medium text-sm truncate max-w-[200px] xl:max-w-none ${isCurrent ? 'text-blue-700 dark:text-blue-400' : 'text-gray-900 dark:text-base-content'}`} title={account.email}>
+                <div className="flex items-center gap-3">
+                    <span className={cn(
+                        "font-medium text-sm truncate max-w-[180px] xl:max-w-none transition-colors",
+                        isCurrent ? "text-blue-700 dark:text-blue-400" : "text-gray-900 dark:text-base-content"
+                    )} title={account.email}>
                         {account.email}
                     </span>
-                    {isCurrent && (
-                        <span className="px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-semibold whitespace-nowrap">
-                            {t('accounts.current')}
-                        </span>
-                    )}
-                    {account.quota?.is_forbidden && (
-                        <span className="px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[10px] font-semibold flex items-center gap-1 whitespace-nowrap" title={t('accounts.forbidden_tooltip')}>
-                            <Lock className="w-3 h-3" />
-                            <span>{t('accounts.forbidden')}</span>
-                        </span>
-                    )}
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        {isCurrent && (
+                            <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[10px] font-bold shadow-sm border border-blue-200/50 dark:border-blue-800/50">
+                                {t('accounts.current').toUpperCase()}
+                            </span>
+                        )}
+
+                        {account.quota?.is_forbidden && (
+                            <span className="px-2 py-0.5 rounded-md bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 text-[10px] font-bold flex items-center gap-1 shadow-sm border border-red-200/50" title={t('accounts.forbidden_tooltip')}>
+                                <Lock className="w-2.5 h-2.5" />
+                                <span>{t('accounts.forbidden')}</span>
+                            </span>
+                        )}
+
+                        {/* 订阅类型徽章 */}
+                        {account.quota?.subscription_tier && (() => {
+                            const tier = account.quota.subscription_tier.toLowerCase();
+                            if (tier.includes('ultra')) {
+                                return (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-purple-600 to-pink-600 text-white text-[10px] font-bold shadow-sm hover:scale-105 transition-transform cursor-default">
+                                        <Gem className="w-2.5 h-2.5 fill-current" />
+                                        ULTRA
+                                    </span>
+                                );
+                            } else if (tier.includes('pro')) {
+                                return (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-bold shadow-sm hover:scale-105 transition-transform cursor-default">
+                                        <Diamond className="w-2.5 h-2.5 fill-current" />
+                                        PRO
+                                    </span>
+                                );
+                            } else {
+                                return (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-400 text-[10px] font-bold shadow-sm border border-gray-200 dark:border-white/10 hover:bg-gray-200 transition-colors cursor-default">
+                                        <Circle className="w-2.5 h-2.5" />
+                                        FREE
+                                    </span>
+                                );
+                            }
+                        })()}
+                    </div>
                 </div>
             </td>
 

@@ -2,26 +2,24 @@
 // 对应 transformClaudeRequestIn
 
 use super::models::*;
-// use crate::proxy::common::model_mapping::map_claude_model_to_gemini;
+use crate::proxy::mappers::signature_store::get_thought_signature;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-// use once_cell::sync::Lazy;
-// use regex::Regex;
 
 /// 转换 Claude 请求为 Gemini v1internal 格式
 pub fn transform_claude_request_in(
     claude_req: &ClaudeRequest,
     project_id: &str,
 ) -> Result<Value, String> {
-    // 检测是否有联网工具
+    // 检测是否有联网工具 (server tool or built-in tool)
     let has_web_search_tool = claude_req
         .tools
         .as_ref()
         .map(|tools| {
             tools.iter().any(|t| {
-                t.name.as_deref() == Some("web_search")
+                t.is_web_search() 
                     || t.name.as_deref() == Some("google_search")
-                    || t.tool_type.as_deref() == Some("web_search_20250305")
+                    || t.type_.as_deref() == Some("web_search_20250305")
             })
         })
         .unwrap_or(false);
@@ -33,7 +31,11 @@ pub fn transform_claude_request_in(
     let system_instruction = build_system_instruction(&claude_req.system, &claude_req.model);
 
     //  Map model name (Use standard mapping)
-    let mapped_model = crate::proxy::common::model_mapping::map_claude_model_to_gemini(&claude_req.model);
+    let mapped_model = if has_web_search_tool {
+        "gemini-2.5-flash".to_string()
+    } else {
+        crate::proxy::common::model_mapping::map_claude_model_to_gemini(&claude_req.model)
+    };
     
     // 将 Claude 工具转为 Value 数组以便探测联网
     let tools_val: Option<Vec<Value>> = claude_req.tools.as_ref().map(|list| {
@@ -42,21 +44,27 @@ pub fn transform_claude_request_in(
 
     // Resolve grounding config
     let config = crate::proxy::mappers::common_utils::resolve_request_config(&claude_req.model, &mapped_model, &tools_val);
-    
     // Only Gemini models support our "dummy thought" workaround.
     // Claude models routed via Vertex/Google API often require valid thought signatures.
     let allow_dummy_thought = config.final_model.starts_with("gemini-");
 
     // 4. Generation Config & Thinking
     let generation_config = build_generation_config(claude_req, has_web_search_tool);
-    
+
     // Check if thinking is enabled
-    let is_thinking_enabled = claude_req.thinking.as_ref()
+    let is_thinking_enabled = claude_req
+        .thinking
+        .as_ref()
         .map(|t| t.type_ == "enabled")
         .unwrap_or(false);
 
     // 2. Contents (Messages)
-    let contents = build_contents(&claude_req.messages, &mut tool_id_to_name, is_thinking_enabled, allow_dummy_thought)?;
+    let contents = build_contents(
+        &claude_req.messages,
+        &mut tool_id_to_name,
+        is_thinking_enabled,
+        allow_dummy_thought,
+    )?;
 
     // 3. Tools
     let tools = build_tools(&claude_req.tools, has_web_search_tool)?;
@@ -104,22 +112,22 @@ pub fn transform_claude_request_in(
 
     // Inject imageConfig if present (for image generation models)
     if let Some(image_config) = config.image_config {
-         if let Some(obj) = inner_request.as_object_mut() {
-             // 1. Remove tools (image generation does not support tools)
-             obj.remove("tools");
-             
-             // 2. Remove systemInstruction (image generation does not support system prompts)
-             obj.remove("systemInstruction");
+        if let Some(obj) = inner_request.as_object_mut() {
+            // 1. Remove tools (image generation does not support tools)
+            obj.remove("tools");
 
-             // 3. Clean generationConfig (remove thinkingConfig, responseMimeType, responseModalities etc.)
-             let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
-             if let Some(gen_obj) = gen_config.as_object_mut() {
-                 gen_obj.remove("thinkingConfig");
-                 gen_obj.remove("responseMimeType"); 
-                 gen_obj.remove("responseModalities");
-                 gen_obj.insert("imageConfig".to_string(), image_config);
-             }
-         }
+            // 2. Remove systemInstruction (image generation does not support system prompts)
+            obj.remove("systemInstruction");
+
+            // 3. Clean generationConfig (remove thinkingConfig, responseMimeType, responseModalities etc.)
+            let gen_config = obj.entry("generationConfig").or_insert_with(|| json!({}));
+            if let Some(gen_obj) = gen_config.as_object_mut() {
+                gen_obj.remove("thinkingConfig");
+                gen_obj.remove("responseMimeType");
+                gen_obj.remove("responseModalities");
+                gen_obj.insert("imageConfig".to_string(), image_config);
+            }
+        }
     }
 
     // 生成 requestId
@@ -222,6 +230,7 @@ fn build_contents(
                         ContentBlock::Thinking { thinking, signature, .. } => {
                             let mut part = json!({
                                 "text": thinking,
+                                "thought": true,
                             });
                             // [New] 递归清理黑名单字段（如 cache_control）
                             crate::proxy::common::json_schema::clean_json_schema(&mut part);
@@ -257,13 +266,30 @@ fn build_contents(
                             // 存储 id -> name 映射
                             tool_id_to_name.insert(id.clone(), name.clone());
 
-                            // [修复] 如果客户端没传签名，尝试回填上下文中的最后一次签名
-                            if let Some(sig) = signature.as_ref().or(last_thought_signature.as_ref()) {
+                            // Signature resolution logic (Priority: Client -> Context -> Global Store)
+                            let final_sig = signature.as_ref()
+                                .or(last_thought_signature.as_ref())
+                                .cloned()
+                                .or_else(|| {
+                                    let global_sig = get_thought_signature();
+                                    if global_sig.is_some() {
+                                        tracing::info!("[Claude-Request] Using global thought_signature fallback (length: {})", 
+                                            global_sig.as_ref().unwrap().len());
+                                    }
+                                    global_sig
+                                });
+
+                            if let Some(sig) = final_sig {
                                 part["thoughtSignature"] = json!(sig);
                             }
                             parts.push(part);
                         }
-                        ContentBlock::ToolResult { tool_use_id, content, is_error, .. } => {
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                            ..
+                        } => {
                             // 优先使用之前记录的 name，否则用 tool_use_id
                             let func_name = tool_id_to_name
                                 .get(tool_use_id)
@@ -273,22 +299,27 @@ fn build_contents(
                             // 处理 content：可能是一个内容块数组或单字符串
                             let mut merged_content = match content {
                                 serde_json::Value::String(s) => s.clone(),
-                                serde_json::Value::Array(arr) => {
-                                    arr.iter().filter_map(|block| {
-                                        if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                                serde_json::Value::Array(arr) => arr
+                                    .iter()
+                                    .filter_map(|block| {
+                                        if let Some(text) =
+                                            block.get("text").and_then(|v| v.as_str())
+                                        {
                                             Some(text)
                                         } else {
                                             None
                                         }
-                                    }).collect::<Vec<_>>().join("\n")
-                                }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
                                 _ => content.to_string(),
                             };
 
                             // [优化] 如果结果为空，注入显式确认信号，防止模型幻觉
                             if merged_content.trim().is_empty() {
                                 if is_error.unwrap_or(false) {
-                                    merged_content = "Tool execution failed with no output.".to_string();
+                                    merged_content =
+                                        "Tool execution failed with no output.".to_string();
                                 } else {
                                     merged_content = "Command executed successfully.".to_string();
                                 }
@@ -327,16 +358,19 @@ fn build_contents(
         // Fix for "Thinking enabled, assistant message must start with thinking block" 400 error
         // ONLY apply this for the LAST assistant message (Pre-fill scenario)
         if allow_dummy_thought && role == "model" && is_thinking_enabled && i == msg_count - 1 {
-            let has_thought_part = parts.iter().any(|p| {
-                p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false)
-            });
-            
+            let has_thought_part = parts
+                .iter()
+                .any(|p| p.get("thought").and_then(|v| v.as_bool()).unwrap_or(false));
+
             if !has_thought_part {
-                // Prepend a dummy thinking block
-                parts.insert(0, json!({
-                    "text": "Thinking...",
-                    "thought": true
-                }));
+                // Prepend a dummy thinking block to satisfy Gemini v1internal requirements
+                parts.insert(
+                    0,
+                    json!({
+                        "text": "Thinking...",
+                        "thought": true
+                    }),
+                );
             }
         }
 
@@ -354,31 +388,33 @@ fn build_contents(
 }
 
 /// 构建 Tools
-fn build_tools(
-    tools: &Option<Vec<Tool>>,
-    has_web_search: bool,
-) -> Result<Option<Value>, String> {
+fn build_tools(tools: &Option<Vec<Tool>>, has_web_search: bool) -> Result<Option<Value>, String> {
     if let Some(tools_list) = tools {
         let mut function_declarations: Vec<Value> = Vec::new();
         let mut has_google_search = has_web_search;
 
         for tool in tools_list {
-            // 1. 检测内置工具类型 (Anthropic Built-in)
-            if let Some(t_type) = &tool.tool_type {
+            // 1. Detect server tools / built-in tools like web_search
+            if tool.is_web_search() {
+                has_google_search = true;
+                continue;
+            }
+
+            if let Some(t_type) = &tool.type_ {
                 if t_type == "web_search_20250305" {
                     has_google_search = true;
                     continue;
                 }
             }
 
-            // 2. 检测通用工具名称 (如 Cherry Studio/OpenAI 客户端常见的自定义名称)
+            // 2. Detect by name
             if let Some(name) = &tool.name {
                 if name == "web_search" || name == "google_search" {
                     has_google_search = true;
                     continue;
                 }
 
-                // 普通工具转换
+                // 3. Client tools require input_schema
                 let mut input_schema = tool.input_schema.clone().unwrap_or(json!({
                     "type": "object",
                     "properties": {}
@@ -426,8 +462,8 @@ fn build_generation_config(claude_req: &ClaudeRequest, has_web_search: bool) -> 
             if let Some(budget_tokens) = thinking.budget_tokens {
                 let mut budget = budget_tokens;
                 // gemini-2.5-flash 上限 24576
-                let is_flash_model = has_web_search
-                    || claude_req.model.contains("gemini-2.5-flash");
+                let is_flash_model =
+                    has_web_search || claude_req.model.contains("gemini-2.5-flash");
                 if is_flash_model {
                     budget = budget.min(24576);
                 }
@@ -556,29 +592,24 @@ mod tests {
                 },
                 Message {
                     role: "assistant".to_string(),
-                    content: MessageContent::Array(vec![
                         ContentBlock::ToolUse {
                             id: "call_1".to_string(),
                             name: "run_command".to_string(),
                             input: json!({"command": "ls"}),
                             signature: None,
-                            cache_control: None,
                         }
-                    ]),
                 },
                 Message {
                     role: "user".to_string(),
-                    content: MessageContent::Array(vec![
-                        ContentBlock::ToolResult {
-                            tool_use_id: "call_1".to_string(),
-                            content: json!([
-                                {"type": "text", "text": "file1.txt\n"},
-                                {"type": "text", "text": "file2.txt"}
-                            ]),
-                            is_error: Some(false),
-                        }
-                    ]),
-                }
+                    content: MessageContent::Array(vec![ContentBlock::ToolResult {
+                        tool_use_id: "call_1".to_string(),
+                        content: json!([
+                            {"type": "text", "text": "file1.txt\n"},
+                            {"type": "text", "text": "file2.txt"}
+                        ]),
+                        is_error: Some(false),
+                    }]),
+                },
             ],
             system: None,
             tools: None,
@@ -596,15 +627,15 @@ mod tests {
 
         let body = result.unwrap();
         let contents = body["request"]["contents"].as_array().unwrap();
-        
+
         // Check the tool result message (last message)
         let tool_resp_msg = &contents[2];
         let parts = tool_resp_msg["parts"].as_array().unwrap();
         let func_resp = &parts[0]["functionResponse"];
-        
+
         assert_eq!(func_resp["name"], "run_command");
         assert_eq!(func_resp["id"], "call_1");
-        
+
         // Verify merged content
         let resp_text = func_resp["response"]["result"].as_str().unwrap();
         assert!(resp_text.contains("file1.txt"));
@@ -612,4 +643,3 @@ mod tests {
         assert!(resp_text.contains("\n"));
     }
 }
-
