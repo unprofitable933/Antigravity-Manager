@@ -65,6 +65,11 @@ pub async fn handle_chat_completions(
         // 4. 转换请求
         let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
 
+        // [Debug] 打印发送给 Gemini 的 tools 部分
+        if let Some(tools) = gemini_body.get("request").and_then(|r| r.get("tools")) {
+            tracing::debug!("[Debug] Gemini request tools: {}", serde_json::to_string_pretty(tools).unwrap_or_default());
+        }
+
         // 5. 发送请求
         let list_response = openai_req.stream;
         let method = if list_response { "streamGenerateContent" } else { "generateContent" };

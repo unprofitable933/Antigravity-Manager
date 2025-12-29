@@ -232,6 +232,13 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 }
             }
 
+            // [修复] 将 Anthropic 格式的 input_schema 重命名为 Gemini 格式的 parameters
+            if let Some(obj) = gemini_func.as_object_mut() {
+                if let Some(input_schema) = obj.remove("input_schema") {
+                    obj.insert("parameters".to_string(), input_schema);
+                }
+            }
+
             if let Some(params) = gemini_func.get_mut("parameters") {
                 // 先应用全局清洗
                 crate::proxy::common::json_schema::clean_json_schema(params);
@@ -243,6 +250,14 @@ pub fn transform_openai_request(request: &OpenAIRequest, project_id: &str, mappe
                 }
                 map_json_schema_to_gemini(params);
             }
+
+            // [修复] 只保留 Gemini functionDeclarations 支持的字段
+            if let Some(obj) = gemini_func.as_object_mut() {
+                let allowed_keys: std::collections::HashSet<&str> =
+                    ["name", "description", "parameters"].iter().cloned().collect();
+                obj.retain(|k, _| allowed_keys.contains(k.as_str()));
+            }
+
             function_declarations.push(gemini_func);
         }
         
