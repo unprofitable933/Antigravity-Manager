@@ -13,14 +13,24 @@ pub async fn handle_chat_completions(
     State(state): State<AppState>,
     Json(body): Json<Value>
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // 调试：打印原始请求体
-    tracing::debug!("[OpenAI] Raw request body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+    // 生成 Trace ID
+    let trace_id: String = rand::Rng::sample_iter(rand::thread_rng(), &rand::distributions::Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect::<String>().to_lowercase();
+    
+    // [DEBUG] 打印原始请求
+    tracing::debug!("[OpenAI-{}] Raw request body: {}", trace_id, serde_json::to_string_pretty(&body).unwrap_or_default());
     
     let mut openai_req: OpenAIRequest = serde_json::from_value(body.clone())
         .map_err(|e| {
-            tracing::error!("[OpenAI] Failed to parse request: {}\nBody: {}", e, serde_json::to_string_pretty(&body).unwrap_or_default());
+            tracing::error!("[OpenAI-{}] Failed to parse request: {}\nBody: {}", trace_id, e, serde_json::to_string_pretty(&body).unwrap_or_default());
             (StatusCode::BAD_REQUEST, format!("Invalid request: {}", e))
         })?;
+    
+    // [DEBUG] 打印接收到的 OpenAI 请求
+    tracing::info!("[OpenAI-{}] 📥 [1/4] 接收到原始 OpenAI 请求: model={}, stream={}, messages={}", 
+        trace_id, openai_req.model, openai_req.stream, openai_req.messages.len());
 
     // Safety: Ensure messages is not empty
     if openai_req.messages.is_empty() {
@@ -71,10 +81,13 @@ pub async fn handle_chat_completions(
         // 4. 转换请求
         let gemini_body = transform_openai_request(&openai_req, &project_id, &mapped_model);
 
-        // [Debug] 打印发送给 Gemini 的 tools 部分
-        if let Some(tools) = gemini_body.get("request").and_then(|r| r.get("tools")) {
-            tracing::debug!("[Debug] Gemini request tools: {}", serde_json::to_string_pretty(tools).unwrap_or_default());
-        }
+        // [DEBUG] 打印发送给 Gemini 的请求摘要
+        tracing::info!("[OpenAI-{}] 📤 [2/4] 发送给 Gemini: model={}, type={}, project={}", 
+            trace_id,
+            gemini_body.get("model").and_then(|v| v.as_str()).unwrap_or("unknown"),
+            gemini_body.get("requestType").and_then(|v| v.as_str()).unwrap_or("unknown"),
+            &project_id[..project_id.len().min(10)]
+        );
 
         // 5. 发送请求
         let list_response = openai_req.stream;
@@ -120,6 +133,12 @@ pub async fn handle_chat_completions(
                 .map_err(|e| (StatusCode::BAD_GATEWAY, format!("Parse error: {}", e)))?;
 
             let openai_response = transform_openai_response(&gemini_resp);
+            
+            // [DEBUG] 打印响应摘要
+            tracing::info!("[OpenAI-{}] 📥 [3/4] 从 Gemini 收到响应", trace_id);
+            tracing::info!("[OpenAI-{}] 📤 [4/4] 返回给客户端: model={}, choices={}", 
+                trace_id, openai_response.model, openai_response.choices.len());
+            
             return Ok(Json(openai_response).into_response());
         }
 

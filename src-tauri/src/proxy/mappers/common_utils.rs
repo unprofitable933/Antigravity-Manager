@@ -41,34 +41,42 @@ pub fn resolve_request_config(
     // Strip -online suffix from original model if present (to detect networking intent)
     let is_online_suffix = original_model.ends_with("-online");
     
-    // High-quality grounding allowlist (Only for models known to support search and be relatively 'safe')
-    let is_high_quality_model = mapped_model == "gemini-2.5-flash"
+    // High-quality Gemini models that support automatic networking
+    // Claude models are excluded from auto-networking to allow them to work in non-networking mode
+    let is_high_quality_gemini = mapped_model == "gemini-2.5-flash"
         || mapped_model == "gemini-1.5-pro"
         || mapped_model.starts_with("gemini-1.5-pro-")
         || mapped_model.starts_with("gemini-2.5-flash-")
         || mapped_model.starts_with("gemini-2.0-flash")
-        || mapped_model.starts_with("gemini-3-")
-        || mapped_model.contains("claude-3-5-sonnet")
-        || mapped_model.contains("claude-3-opus")
-        || mapped_model.contains("claude-sonnet")
-        || mapped_model.contains("claude-opus")
-        || mapped_model.contains("claude-4");
+        || mapped_model.starts_with("gemini-3-");
+
+    // Detect Claude models
+    let is_claude_model = mapped_model.contains("claude-");
 
     // Determine if we should enable networking
-    // 策略优化：如果请求显式带了本地工具 (MCP)，哪怕是 Sonnet 等顶级模型，也不自动开启联网，防止触发 400 冲突。
-    // 除非用户显式通过 -online 后缀要求联网。
-    let enable_networking = is_online_suffix || (is_high_quality_model && !has_non_networking) || has_networking_tool;
+    // Strategy:
+    // 1. Explicit -online suffix: Force enable
+    // 2. High-quality Gemini models (without local tools): Auto enable
+    // 3. Explicit networking tool: Enable
+    // 4. Claude models: Do NOT auto-enable (unless explicitly requested via -online or tools)
+    let enable_networking = is_online_suffix 
+        || (is_high_quality_gemini && !has_non_networking) 
+        || has_networking_tool;
 
     // The final model to send upstream should be the MAPPED model, 
     // but if searching, we MUST ensure the model name is one the backend associates with search.
     // Based on ref_Antigravity2Api practice, we force a stable search model for search requests.
     let mut final_model = mapped_model.trim_end_matches("-online").to_string();
     if enable_networking {
-        // If it's a thinking model (which doesn't support tools) or a Claude-style alias, 
-        // fallback to gemini-2.5-flash which is the standard workhorse for search.
-        if final_model.contains("thinking") || !final_model.starts_with("gemini-") {
+        // If it's a thinking model (which doesn't support tools), fallback to gemini-2.5-flash
+        // Note: Claude models can support networking when explicitly requested, so don't force conversion
+        if final_model.contains("thinking") {
+            final_model = "gemini-2.5-flash".to_string();
+        } else if !final_model.starts_with("gemini-") && !is_claude_model {
+            // For non-Gemini, non-Claude models, fallback to gemini-2.5-flash for search
             final_model = "gemini-2.5-flash".to_string();
         }
+        // Claude models keep their original name even in networking mode
     }
 
     RequestConfig {

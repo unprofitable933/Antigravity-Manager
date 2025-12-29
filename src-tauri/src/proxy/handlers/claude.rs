@@ -80,6 +80,19 @@ pub async fn handle_messages(
     
     crate::modules::logger::log_info(&format!("[{}] Received Claude request for model: {}, content_preview: {:.100}...", trace_id, request.model, latest_msg));
 
+    // [DEBUG] 打印关键请求信息
+    tracing::info!("[{}] 📥 [1/4] 接收到原始 Claude API 请求: model={}, stream={}, messages={}{}", 
+        trace_id, 
+        request.model, 
+        request.stream, 
+        request.messages.len(),
+        if let Some(thinking) = &request.thinking {
+            format!(", thinking={}(budget={:?})", thinking.type_, thinking.budget_tokens)
+        } else {
+            String::new()
+        }
+    );
+
     // 1. 获取 会话 ID (已废弃基于内容的哈希，改用 TokenManager 内部的时间窗口锁定)
     let session_id: Option<&str> = None;
 
@@ -244,6 +257,19 @@ pub async fn handle_messages(
             }
         };
         
+        // [DEBUG] 打印发送给 Gemini 的请求摘要
+        let has_thinking_config = gemini_body.get("request")
+            .and_then(|r| r.get("generationConfig"))
+            .and_then(|g| g.get("thinkingConfig"))
+            .is_some();
+        tracing::info!("[{}] 📤 [2/4] 发送给 Gemini: model={}, type={}, project={}, thinkingConfig={}", 
+            trace_id,
+            gemini_body.get("model").and_then(|v| v.as_str()).unwrap_or("unknown"),
+            gemini_body.get("requestType").and_then(|v| v.as_str()).unwrap_or("unknown"),
+            &project_id[..project_id.len().min(10)],
+            has_thinking_config
+        );
+
     // 4. 上游调用
     let is_stream = request.stream;
     let method = if is_stream { "streamGenerateContent" } else { "generateContent" };
@@ -295,9 +321,34 @@ pub async fn handle_messages(
                     Err(e) => return (StatusCode::BAD_GATEWAY, format!("Failed to read body: {}", e)).into_response(),
                 };
                 
-                // Debug print
+                // [DEBUG] 打印从 Gemini 收到的响应摘要
                 if let Ok(text) = String::from_utf8(bytes.to_vec()) {
-                    debug!("Upstream Response for Claude request: {}", text);
+                    if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+                        let mut parts_info = Vec::new();
+                        if let Some(response_obj) = parsed.get("response") {
+                            if let Some(candidates) = response_obj.get("candidates").and_then(|v| v.as_array()) {
+                                if let Some(first) = candidates.get(0) {
+                                    if let Some(content) = first.get("content") {
+                                        if let Some(parts) = content.get("parts").and_then(|v| v.as_array()) {
+                                            for part in parts {
+                                                if part.get("thought").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                                    parts_info.push("thought");
+                                                } else if part.get("text").is_some() {
+                                                    parts_info.push("text");
+                                                } else if part.get("functionCall").is_some() {
+                                                    parts_info.push("functionCall");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        tracing::info!("[{}] 📥 [3/4] 从 Gemini 收到响应: {} bytes, parts=[{}]", 
+                            trace_id, bytes.len(), parts_info.join(", "));
+                    } else {
+                        debug!("Upstream Response for Claude request: {}", text);
+                    }
                 }
 
                 let gemini_resp: Value = match serde_json::from_slice(&bytes) {
@@ -320,9 +371,28 @@ pub async fn handle_messages(
                     Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("Transform error: {}", e)).into_response(),
                 };
 
+                // [DEBUG] 打印返回给客户端的响应摘要
+                let mut content_types = Vec::new();
+                for block in &claude_response.content {
+                    match block {
+                        crate::proxy::mappers::claude::models::ContentBlock::Text { .. } => content_types.push("text"),
+                        crate::proxy::mappers::claude::models::ContentBlock::Thinking { .. } => content_types.push("thinking"),
+                        crate::proxy::mappers::claude::models::ContentBlock::ToolUse { .. } => content_types.push("tool_use"),
+                        _ => content_types.push("other"),
+                    }
+                }
+                tracing::info!("[{}] 📤 [4/4] 返回给客户端: model={}, blocks=[{}], tokens={}+{}={}", 
+                    trace_id,
+                    claude_response.model,
+                    content_types.join(", "),
+                    claude_response.usage.input_tokens,
+                    claude_response.usage.output_tokens,
+                    claude_response.usage.input_tokens + claude_response.usage.output_tokens
+                );
+                
                 // [Optimization] 记录闭环日志：消耗情况
                 tracing::info!(
-                    "[{}] Request finished. Model: {}, Tokens: In {}, Out {}", 
+                    "[{}] ✅ Request finished. Model: {}, Tokens: In {}, Out {}", 
                     trace_id, 
                     request_with_mapped.model, 
                     claude_response.usage.input_tokens, 
